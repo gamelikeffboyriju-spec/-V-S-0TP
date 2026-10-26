@@ -28,7 +28,8 @@ from telegram.error import TelegramError, RetryAfter
 # ══════════════════════════════════════════════════════════════
 BOT_TOKEN = os.environ.get("BOT_TOKEN", "8350157654:AAERJoVCuICl0hasoIIb1X7SLgH1kp9MuZ8")
 
-_otp_groups_raw = os.environ.get("OTP_GROUP_IDS", "-1003870313704)
+# FIXED LINE 31 — closing quote added
+_otp_groups_raw = os.environ.get("OTP_GROUP_IDS", "-1003870313704")
 OTP_GROUP_IDS: List[int] = [int(x.strip()) for x in _otp_groups_raw.split(",") if x.strip()]
 
 # IVAS_ACCOUNTS via env (JSON). Default = your live endpoint.
@@ -207,11 +208,6 @@ def format_otp_rich(number: str, service: str, otp: Optional[str],
 #  IVAS MS SOCKET.IO v4 CLIENT
 # ══════════════════════════════════════════════════════════════
 class IvasClient:
-    """
-    Socket.IO v4 client tuned for ivasmus.com /live/socket.io/
-    Handles: EIO=4 handshake, ping/pong, livesms events, auto-reconnect.
-    """
-
     def __init__(self, name: str, uri: str):
         self.name = name
         self.uri = uri
@@ -241,13 +237,6 @@ class IvasClient:
             pass
 
     async def _handle_event(self, payload):
-        """
-        IVAS payloads can come as:
-          ["sms", {recipient, originator, message, ...}]
-          ["livesms", {recipient, originator, message, ...}]
-          ["newSms", {...}]
-        We just grab payload[1] if it's a dict.
-        """
         if not isinstance(payload, list) or len(payload) < 2:
             return
         data = payload[1]
@@ -292,7 +281,6 @@ class IvasClient:
         while not self.stop:
             try:
                 logger.info(f"🔌 [{self.name}] connecting...")
-                # IVAS uses standard socket.io path; no extra headers needed
                 headers = {
                     "User-Agent": "Mozilla/5.0",
                     "Origin": "https://www.ivasms.com",
@@ -311,7 +299,6 @@ class IvasClient:
                     self.connected = True
                     logger.info(f"✅ [{self.name}] connected")
 
-                    # EIO=4 OPEN
                     first = await asyncio.wait_for(ws.recv(), timeout=15)
                     logger.info(f"📥 [{self.name}] open: {first[:100]}")
                     if first.startswith("0"):
@@ -321,11 +308,8 @@ class IvasClient:
                         except Exception:
                             pass
 
-                    # Socket.IO CONNECT
                     await ws.send("40")
                     await asyncio.sleep(0.3)
-
-                    # Join livesms room (both packet styles for compatibility)
                     for join_pkt in ('40/livesms,', '42/livesms,["livesms"]'):
                         try:
                             await ws.send(join_pkt)
@@ -344,7 +328,7 @@ class IvasClient:
                         self.ws = None
                         self.connected = False
 
-                backoff = 3  # reset after successful connect
+                backoff = 3
             except asyncio.CancelledError:
                 raise
             except Exception as e:
@@ -356,7 +340,6 @@ class IvasClient:
     async def _dispatch(self, msg: str):
         if not msg:
             return
-        # engine.io ping
         if msg == "2":
             try:
                 await self.ws.send("3")
@@ -365,13 +348,10 @@ class IvasClient:
             return
         if msg == "3":
             return
-        # engine.io upgrade? ignore
         if msg.startswith("2"):
             return
-        # socket.io event
         if msg.startswith("42"):
             body = msg[2:]
-            # strip namespace "42/livesms,[...]"
             if body.startswith("/"):
                 c = body.find(",")
                 if c != -1:
@@ -383,17 +363,15 @@ class IvasClient:
                 return
             await self._handle_event(payload)
             return
-        # socket.io connect ack
         if msg.startswith("40"):
             logger.info(f"🟢 [{self.name}] socket.io connected")
             return
-        # disconnect / error
         if msg.startswith("41") or msg.startswith("44"):
             logger.warning(f"⚠️ [{self.name}] socket.io disconnect/err: {msg}")
 
 
 # ══════════════════════════════════════════════════════════════
-#  HTTP HEALTH SERVER (for Render)
+#  HTTP HEALTH SERVER
 # ══════════════════════════════════════════════════════════════
 async def health_handler(request: web.Request) -> web.Response:
     return web.json_response({
