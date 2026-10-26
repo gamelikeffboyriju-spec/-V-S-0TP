@@ -1,0 +1,4 @@
+websockets==12.0
+python-telegram-bot==21.6
+phonenumbers==8.13.47
+aiohttp==3.10.10
